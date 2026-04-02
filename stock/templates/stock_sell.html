@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% block content %}
+    <div>
+        <h3>Продажа акций {{ stock.name }} ({{ stock.ticker }})</h3>
+        {% if stock.logo %}
+            <img src="{{ MEDIA_URL }}/{{ stock.logo }}" width="40" />
+        {% endif %}
+    </div>
+    <div class="mt-3">
+        <form method="POST" action="{% url 'stock:sell' stock.pk %}">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit" class="btn btn-danger">Продать</button>
+        </form>
+    </div>
+    <div class="mt-3">
+        <a href="{% url 'stock:detail' stock.pk %}">Назад к акции</a> |
+        <a href="{% url 'stock:list' %}">К списку акций</a>
+    </div>
+{% endblock %}

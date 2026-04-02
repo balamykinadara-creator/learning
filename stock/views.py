@@ -3,7 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 
 from stock.models import Stock, AccountCurrency, AccountStock, Currency
-from stock.forms import BuySellForm
+from stock.forms import BuySellForm, SellForm
 
 
 def stock_list(request):
@@ -17,9 +17,10 @@ def stock_list(request):
 @login_required
 def stock_detail(request, pk):
     stock = get_object_or_404(Stock, pk=pk)
+    random_price = stock.get_random_price()
     context = {
         'stock': stock,
-        'form': BuySellForm(initial={'price': stock.get_random_price()})
+        'buy_form': BuySellForm(initial={'price': random_price}),
     }
     return render(request, 'stock.html', context)
 
@@ -73,6 +74,53 @@ def stock_buy(request, pk):
 
 
 @login_required
+def stock_sell(request, pk):
+    stock = get_object_or_404(Stock, pk=pk)
+    
+    if request.method == "POST":
+        form = SellForm(request.POST)
+        if form.is_valid():
+            amount = form.cleaned_data['amount']
+            price = form.cleaned_data['price']
+            sell_revenue = price * amount
+
+            acc_stock, created = AccountStock.objects.get_or_create(
+                account=request.user.account,
+                stock=stock,
+                defaults={'average_buy_cost': 0, 'amount': 0}
+            )
+
+            if acc_stock.amount < amount:
+                form.add_error('amount', f'У вас только {acc_stock.amount} акций {stock.ticker}')
+            else:
+                acc_currency, created = AccountCurrency.objects.get_or_create(
+                    account=request.user.account,
+                    currency=stock.currency,
+                    defaults={'amount': 0}
+                )
+
+                acc_stock.amount = acc_stock.amount - amount
+
+                if acc_stock.amount == 0:
+                    acc_stock.delete()
+                else:
+                    acc_stock.save()
+
+                acc_currency.amount = acc_currency.amount + sell_revenue
+                acc_currency.save()
+
+                return redirect('stock:account')
+    else:
+        form = SellForm(initial={'price': stock.get_random_price()})
+
+    context = {
+        'stock': stock,
+        'form': form
+    }
+    return render(request, 'stock_sell.html', context)
+
+
+@login_required
 def account(request):
     currencies = cache.get(f'currencies_{request.user.username}')
     stocks = cache.get(f'stocks_{request.user.username}')
@@ -84,17 +132,18 @@ def account(request):
                 'sign': acc_currency.currency.sign
             } for acc_currency in request.user.account.accountcurrency_set.select_related('currency')
         ]
-        cache.set(f'currencies_{request.user.username}', currencies, 300)
+        cache.set(f'currencies_{request.user.username}', currencies, 10)
 
     if stocks is None:
         stocks = [
             {
                 'ticker': acc_stock.stock.ticker,
                 'amount': acc_stock.amount,
-                'avg': acc_stock.average_buy_cost
+                'avg': acc_stock.average_buy_cost,
+                'stock_id': acc_stock.stock.id,   # <-- ДОБАВЬ ЭТУ СТРОКУ
             } for acc_stock in request.user.account.accountstock_set.select_related('stock').all()
         ]
-        cache.set(f'stocks_{request.user.username}', stocks, 300)
+        cache.set(f'stocks_{request.user.username}', stocks, 10)
 
     context = {
         'currencies': currencies,
@@ -102,4 +151,3 @@ def account(request):
     }
 
     return render(request, template_name='account.html', context=context)
-
